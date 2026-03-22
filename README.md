@@ -33,3 +33,5 @@ The three things you need to provision: <br/>
 •	One new Command Line task in your Classic pipeline (or a step in YAML) that calls python scripts/ai_review.py <br/> <br/>
 Total setup time for an experienced Azure DevOps user is around 30 to 45 minutes for the first repository. Subsequent repositories take about 10 minutes each — copy the two files, link the variable group, add the task. <br/><br/>
 <i>Suggestion: Start with REVIEW_FAIL_ON=info for the first week. Observe the findings. Tune the prompts for your team's conventions. Then escalate to critical,high when you are confident in the signal. </i>
+
+
