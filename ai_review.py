@@ -217,281 +217,297 @@ def post_pr_comment(body: str):
 # ─── HTML Dashboard generator ────────────────────────────────────────────────
 
 def build_dashboard(all_issues: list, meta: dict) -> str:
+    """
+    Generates a fully inline-styled HTML report for the ADO Extensions tab.
+    Rules:
+      - Zero <style> blocks or class= attributes (ADO CSP strips them)
+      - All colours work on BOTH light and dark ADO themes
+        -> dark backgrounds with light text throughout, no reliance on
+           the host page background colour
+    """
     severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
-    all_issues_sorted = sorted(all_issues, key=lambda i: severity_order.get(i.get("severity","info"), 4))
+    all_issues_sorted = sorted(
+        all_issues,
+        key=lambda i: severity_order.get(i.get("severity", "info"), 4)
+    )
 
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0}
     for i in all_issues:
-        counts[i.get("severity", "info")] = counts.get(i.get("severity","info"), 0) + 1
+        sev = i.get("severity", "info")
+        counts[sev] = counts.get(sev, 0) + 1
 
     domain_counts = {}
     for i in all_issues:
         d = i.get("domain", "unknown")
         domain_counts[d] = domain_counts.get(d, 0) + 1
 
-    total = len(all_issues)
+    total  = len(all_issues)
     passed = total == 0 or (counts["critical"] == 0 and counts["high"] == 0)
-    status_text = "PASSED" if passed else "FAILED"
-    status_color = "#10b981" if passed else "#ef4444"
 
-    def badge(sev):
-        colors = {
-            "critical": ("#7f1d1d","#fca5a5"),
-            "high":     ("#78350f","#fcd34d"),
-            "medium":   ("#1e3a5f","#93c5fd"),
-            "low":      ("#064e3b","#6ee7b7"),
-            "info":     ("#1f2937","#d1d5db"),
-        }
-        bg, fg = colors.get(sev, ("#1f2937","#d1d5db"))
-        return f'<span style="background:{bg};color:{fg};padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase">{html.escape(sev)}</span>'
+    # ── Colour tokens — all dark-theme safe ──────────────────────────────────
+    # Page chrome
+    BG_PAGE   = "#1e2430"   # overall page background
+    BG_HEADER = "#151b27"   # top header bar
+    BG_CARD   = "#252d3d"   # card / panel backgrounds
+    BG_ROW    = "#1e2430"   # table row background
+    BG_ROWALT = "#252d3d"   # alternate table row
+    BORDER    = "#2e3a50"   # subtle border
+    TXT_PRI   = "#e2e8f0"   # primary text
+    TXT_SEC   = "#94a3b8"   # secondary / muted text
+    TXT_MONO  = "#7dd3fc"   # monospace (file paths, rules)
 
-    def render_issues(issues):
-        if not issues:
-            return '<p style="color:#6b7280;padding:16px;text-align:center">No issues found &#x2713;</p>'
-        rows = []
-        for issue in issues:
-            sev = issue.get("severity", "info")
-            left_colors = {
-                "critical": "#ef4444", "high": "#f59e0b",
-                "medium": "#3b82f6", "low": "#10b981", "info": "#6b7280"
-            }
-            lc            = left_colors.get(sev, "#6b7280")
-            domain_key    = issue.get("domain", "")
-            domain_info   = DOMAINS.get(domain_key, {})
-            domain_title  = html.escape(domain_info.get("title", domain_key))
-            icon          = domain_info.get("icon", "&#x1F50D;")
-            file_str      = html.escape(str(issue.get("file", "unknown")))
-            line_str      = str(issue.get("line", ""))
-            rule_str      = html.escape(str(issue.get("rule", "")))
-            msg_str       = html.escape(str(issue.get("message", "")))
-            sug_str       = html.escape(str(issue.get("suggestion", "")))
-            loc           = (file_str + ":" + line_str) if (line_str and line_str != "0") else file_str
-            sug_html      = ('<p style="color:#6ee7b7;margin:0;font-size:12px;line-height:1.5">&#x1F4A1; '
-                             + sug_str + '</p>') if sug_str else ''
-            card = (
-                '\n<div style="border-left:4px solid ' + lc + ';background:#111827;'
-                'border-radius:0 8px 8px 0;padding:14px 16px;margin-bottom:8px" '
-                'data-sev="' + sev + '" data-domain="' + html.escape(domain_key) + '"">'
-                '\n  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">'
-                '\n    ' + badge(sev) +
-                '\n    <span style="background:#1f2937;color:#9ca3af;padding:2px 8px;border-radius:4px;font-size:11px">' +
-                icon + ' ' + domain_title + '</span>'
-                '\n    <code style="color:#818cf8;font-size:12px">' + rule_str + '</code>'
-                '\n    <span style="color:#4b5563;font-size:11px;margin-left:auto">' + html.escape(loc) + '</span>'
-                '\n  </div>'
-                '\n  <p style="color:#f3f4f6;margin:0 0 6px;font-size:14px;line-height:1.5">' + msg_str + '</p>'
-                '\n  ' + sug_html +
-                '\n</div>'
-            )
-            rows.append(card)
-        return "\n".join(rows)
-
-    domain_tabs = []
-    for key, info in DOMAINS.items():
-        cnt = domain_counts.get(key, 0)
-        badge_color = "#ef4444" if cnt > 0 else "#374151"
-        domain_tabs.append(
-            f'<button onclick="filterDomain(\'{key}\')" '
-            f'style="background:#1f2937;color:#d1d5db;border:1px solid #374151;'
-            f'padding:6px 12px;border-radius:6px;cursor:pointer;font-size:13px;'
-            f'display:inline-flex;align-items:center;gap:6px">'
-            f'{info["icon"]} {info["title"]} '
-            f'<span style="background:{badge_color};color:#fff;border-radius:10px;'
-            f'padding:1px 7px;font-size:11px">{cnt}</span></button>'
-        )
-
-    issues_json = json.dumps(all_issues_sorted)
-
-    # Pre-compute everything that would require complex expressions inside f-strings.
-    # Python < 3.12 does not allow brackets, quotes or ternaries inside f-string braces
-    # when the f-string itself uses the same quote style.
-
-    escaped_build   = html.escape(BUILD_NUM)
-    escaped_branch  = html.escape(BRANCH)
-    escaped_repo    = html.escape(REPO_NAME)
-    escaped_ts      = html.escape(meta.get("timestamp", ""))
-    escaped_dur     = html.escape(str(meta.get("duration_s", "")))
-
-    status_bg       = "#052e16" if passed else "#450a0a"
-    status_icon     = "✅" if passed else "❌"
-    status_border   = status_color + "40"
-    if passed:
-        status_detail = " — No critical or high issues"
-    else:
-        status_detail = " — {0} critical, {1} high issues found".format(
-            counts["critical"], counts["high"]
-        )
-
-    cnt_critical = counts["critical"]
-    cnt_high     = counts["high"]
-    cnt_medium   = counts["medium"]
-    cnt_low      = counts["low"]
-    cnt_info     = counts["info"]
-
-    # Build domain summary cards as a plain string (no nested f-string)
-    domain_cards_parts = []
-    for key, info in DOMAINS.items():
-        dc = domain_counts.get(key, 0)
-        plural = "s" if dc != 1 else ""
-        domain_cards_parts.append(
-            '<div class="summary-card">'
-            '<span class="icon">' + info["icon"] + '</span>'
-            '<div class="info">'
-            '<div class="title">' + info["title"] + '</div>'
-            '<div class="count">' + str(dc) + ' issue' + plural + '</div>'
-            '</div>'
-            '</div>'
-        )
-    domain_cards_html = "\n    ".join(domain_cards_parts)
-
-    domain_tabs_html  = "\n".join(domain_tabs)
-    issues_html       = render_issues(all_issues_sorted)
-
-    return """<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AI Code Review &mdash; Build """ + escaped_build + """</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: #030712; color: #f9fafb; font-family: 'Segoe UI', system-ui, sans-serif; min-height: 100vh; }
-  .header { background: linear-gradient(135deg, #0f172a 0%, #1e1b4b 100%); border-bottom: 1px solid #1f2937; padding: 24px 32px; }
-  .header h1 { font-size: 22px; font-weight: 700; color: #f9fafb; margin-bottom: 4px; }
-  .header .meta { color: #6b7280; font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap; margin-top: 8px; }
-  .header .meta span { display: flex; align-items: center; gap: 4px; }
-  .status-pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 16px; border-radius: 20px; font-weight: 700; font-size: 14px; margin-top: 12px; }
-  .main { padding: 24px 32px; max-width: 1200px; margin: 0 auto; }
-  .scorecard { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 24px; }
-  .score-card { background: #111827; border: 1px solid #1f2937; border-radius: 10px; padding: 16px; text-align: center; }
-  .score-card .num { font-size: 32px; font-weight: 800; margin-bottom: 4px; }
-  .score-card .label { font-size: 12px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; }
-  .filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; align-items: center; }
-  .filters h3 { color: #9ca3af; font-size: 13px; font-weight: 500; margin-right: 4px; }
-  .sev-btn { background: #1f2937; color: #d1d5db; border: 1px solid #374151; padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 13px; }
-  .sev-btn.active { border-color: #6366f1; color: #a5b4fc; }
-  .section-title { font-size: 16px; font-weight: 600; color: #e5e7eb; margin: 20px 0 12px; display: flex; align-items: center; gap: 8px; }
-  .domain-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
-  .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
-  .summary-card { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; gap: 10px; }
-  .summary-card .icon { font-size: 20px; }
-  .summary-card .info .title { font-size: 13px; font-weight: 600; color: #e5e7eb; }
-  .summary-card .info .count { font-size: 12px; color: #6b7280; }
-  input[type=text] { background: #111827; border: 1px solid #374151; color: #f9fafb; padding: 8px 14px; border-radius: 8px; font-size: 14px; width: 280px; outline: none; }
-  input[type=text]::placeholder { color: #4b5563; }
-  #no-results { color: #6b7280; text-align: center; padding: 40px; display: none; }
-</style>
-</head>
-<body>
-<div class="header">
-  <h1>&#x1F916; AI Code Review Dashboard</h1>
-  <div class="meta">
-    <span>&#x1F4E6; Build <strong style="color:#c7d2fe">""" + escaped_build + """</strong></span>
-    <span>&#x1F33F; Branch <strong style="color:#c7d2fe">""" + escaped_branch + """</strong></span>
-    <span>&#x1F5C2; Repo <strong style="color:#c7d2fe">""" + escaped_repo + """</strong></span>
-    <span>&#x1F550; """ + escaped_ts + """</span>
-    <span>&#x23F1; """ + escaped_dur + """s analysis time</span>
-  </div>
-  <div class="status-pill" style="background:""" + status_bg + """;color:""" + status_color + """;border:1px solid """ + status_border + """">
-    """ + status_icon + """ Review """ + status_text + status_detail + """
-  </div>
-</div>
-
-<div class="main">
-  <!-- Score cards -->
-  <div class="scorecard">
-    <div class="score-card">
-      <div class="num" style="color:#ef4444">""" + str(cnt_critical) + """</div>
-      <div class="label">Critical</div>
-    </div>
-    <div class="score-card">
-      <div class="num" style="color:#f59e0b">""" + str(cnt_high) + """</div>
-      <div class="label">High</div>
-    </div>
-    <div class="score-card">
-      <div class="num" style="color:#3b82f6">""" + str(cnt_medium) + """</div>
-      <div class="label">Medium</div>
-    </div>
-    <div class="score-card">
-      <div class="num" style="color:#10b981">""" + str(cnt_low) + """</div>
-      <div class="label">Low</div>
-    </div>
-    <div class="score-card">
-      <div class="num" style="color:#6b7280">""" + str(cnt_info) + """</div>
-      <div class="label">Info</div>
-    </div>
-  </div>
-
-  <!-- Domain summary -->
-  <div class="section-title">&#x1F4CA; Domain Summary</div>
-  <div class="summary-grid">
-    """ + domain_cards_html + """
-  </div>
-
-  <!-- Filters -->
-  <div class="section-title">&#x1F50D; Issues (""" + str(total) + """ total)</div>
-  <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-    <input type="text" id="search" placeholder="Search issues, files, rules..." oninput="applyFilters()">
-    <div class="filters">
-      <h3>Severity:</h3>
-      <button class="sev-btn active" onclick="filterSev('all',this)">All</button>
-      <button class="sev-btn" onclick="filterSev('critical',this)" style="color:#fca5a5">Critical</button>
-      <button class="sev-btn" onclick="filterSev('high',this)" style="color:#fcd34d">High</button>
-      <button class="sev-btn" onclick="filterSev('medium',this)" style="color:#93c5fd">Medium</button>
-      <button class="sev-btn" onclick="filterSev('low',this)" style="color:#6ee7b7">Low</button>
-      <button class="sev-btn" onclick="filterSev('info',this)" style="color:#9ca3af">Info</button>
-    </div>
-  </div>
-  <div class="domain-tabs">""" + domain_tabs_html + """</div>
-
-  <!-- Issues list -->
-  <div id="issues-container">
-    """ + issues_html + """
-  </div>
-  <div id="no-results">No issues match your filter.</div>
-</div>
-
-<script>
-const ALL_ISSUES = """ + issues_json + """;
-let currentSev = 'all';
-let currentDomain = 'all';
-
-function filterSev(sev, btn) {
-  currentSev = sev;
-  document.querySelectorAll('.sev-btn').forEach(b => b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
-  applyFilters();
-}
-
-function filterDomain(domain) {
-  currentDomain = currentDomain === domain ? 'all' : domain;
-  applyFilters();
-}
-
-function applyFilters() {
-  const search = document.getElementById('search').value.toLowerCase();
-  const container = document.getElementById('issues-container');
-  const cards = container.querySelectorAll('[data-sev]');
-  let visible = 0;
-  cards.forEach(card => {
-    const sev = card.getAttribute('data-sev');
-    const dom = card.getAttribute('data-domain');
-    const text = card.textContent.toLowerCase();
-    const sevMatch = currentSev === 'all' || sev === currentSev;
-    const domMatch = currentDomain === 'all' || dom === currentDomain;
-    const searchMatch = !search || text.includes(search);
-    if(sevMatch && domMatch && searchMatch) {
-      card.style.display = '';
-      visible++;
-    } else {
-      card.style.display = 'none';
+    # Severity — badge bg / badge text / left-bar colour
+    SEV = {
+        "critical": ("#7f1d1d", "#fca5a5", "#ef4444"),
+        "high":     ("#78350f", "#fcd34d", "#f59e0b"),
+        "medium":   ("#1e3a5f", "#93c5fd", "#3b82f6"),
+        "low":      ("#14532d", "#86efac", "#22c55e"),
+        "info":     ("#1e293b", "#cbd5e1", "#64748b"),
     }
-  });
-  document.getElementById('no-results').style.display = visible === 0 ? '' : 'none';
-}
-</script>
-</body>
-</html>"""
+
+    # Domain badge colours (bg, text)
+    DOMAIN_BADGE = {
+        "has":  ("#7f1d1d", "#fca5a5"),  # has issues
+        "none": ("#14532d", "#86efac"),  # no issues
+    }
+
+    def sev_badge(sev):
+        bg, fg, _ = SEV.get(sev, SEV["info"])
+        return (
+            "<span style=\"display:inline-block;background:" + bg + ";color:" + fg + ";"
+            "border:1px solid " + fg + "40;padding:2px 10px;border-radius:3px;"
+            "font-size:11px;font-weight:700;font-family:sans-serif;"
+            "letter-spacing:.04em\">" + sev.upper() + "</span>"
+        )
+
+    # ── Issue rows ───────────────────────────────────────────────────────────
+    rows_html = []
+    for idx, issue in enumerate(all_issues_sorted):
+        sev        = issue.get("severity", "info")
+        _, _, bar  = SEV.get(sev, SEV["info"])
+        domain_key = issue.get("domain", "")
+        domain_ttl = html.escape(DOMAINS.get(domain_key, {}).get("title", domain_key))
+        file_str   = html.escape(str(issue.get("file", "")))
+        line_str   = str(issue.get("line", ""))
+        rule_str   = html.escape(str(issue.get("rule", "")))
+        msg_str    = html.escape(str(issue.get("message", "")))
+        sug_str    = html.escape(str(issue.get("suggestion", "")))
+        loc        = (file_str + ":" + line_str) if (line_str and line_str != "0") else file_str
+        row_bg     = BG_ROW if idx % 2 == 0 else BG_ROWALT
+
+        sug_block = ""
+        if sug_str:
+            sug_block = (
+                "<div style=\"margin-top:7px;padding:7px 10px;"
+                "background:#0f2818;border-left:3px solid #22c55e;"
+                "font-size:12px;color:#86efac;"
+                "font-family:sans-serif;line-height:1.5\">"
+                "<strong style=\"color:#4ade80\">Suggestion:</strong> " + sug_str + "</div>"
+            )
+
+        rows_html.append(
+            "<tr style=\"background:" + row_bg + "\">"
+            "<td style=\"width:4px;background:" + bar + ";padding:0;border:none\"></td>"
+            "<td style=\"padding:10px 12px;vertical-align:top;"
+            "border-bottom:1px solid " + BORDER + "\">"
+            + sev_badge(sev) +
+            "</td>"
+            "<td style=\"padding:10px 12px;vertical-align:top;"
+            "border-bottom:1px solid " + BORDER + ";"
+            "font-size:12px;color:" + TXT_SEC + ";"
+            "font-family:sans-serif\">"
+            + domain_ttl +
+            "</td>"
+            "<td style=\"padding:10px 12px;vertical-align:top;"
+            "border-bottom:1px solid " + BORDER + ";min-width:160px\">"
+            "<div style=\"font-size:12px;font-weight:600;color:" + TXT_MONO + ";"
+            "font-family:monospace;margin-bottom:3px\">"
+            + rule_str +
+            "</div>"
+            "<div style=\"font-size:11px;color:" + TXT_SEC + ";"
+            "font-family:monospace;word-break:break-all\">"
+            + html.escape(loc) +
+            "</div>"
+            "</td>"
+            "<td style=\"padding:10px 12px;vertical-align:top;"
+            "border-bottom:1px solid " + BORDER + "\">"
+            "<div style=\"font-size:13px;color:" + TXT_PRI + ";"
+            "font-family:sans-serif;line-height:1.6\">"
+            + msg_str +
+            "</div>"
+            + sug_block +
+            "</td>"
+            "</tr>"
+        )
+
+    issues_table = (
+        "<table style=\"width:100%;border-collapse:collapse\">"
+        "<thead>"
+        "<tr style=\"background:" + BG_HEADER + "\">"
+        "<th style=\"width:4px;padding:0;border:none\"></th>"
+        "<th style=\"padding:9px 12px;text-align:left;font-size:11px;color:" + TXT_SEC + ";"
+        "font-family:sans-serif;font-weight:600;letter-spacing:.05em;"
+        "text-transform:uppercase;border-bottom:2px solid " + BORDER + "\">Severity</th>"
+        "<th style=\"padding:9px 12px;text-align:left;font-size:11px;color:" + TXT_SEC + ";"
+        "font-family:sans-serif;font-weight:600;letter-spacing:.05em;"
+        "text-transform:uppercase;border-bottom:2px solid " + BORDER + "\">Domain</th>"
+        "<th style=\"padding:9px 12px;text-align:left;font-size:11px;color:" + TXT_SEC + ";"
+        "font-family:sans-serif;font-weight:600;letter-spacing:.05em;"
+        "text-transform:uppercase;border-bottom:2px solid " + BORDER + "\">Rule / File</th>"
+        "<th style=\"padding:9px 12px;text-align:left;font-size:11px;color:" + TXT_SEC + ";"
+        "font-family:sans-serif;font-weight:600;letter-spacing:.05em;"
+        "text-transform:uppercase;border-bottom:2px solid " + BORDER + "\">Finding &amp; Suggestion</th>"
+        "</tr>"
+        "</thead>"
+        "<tbody>"
+        + "".join(rows_html) +
+        "</tbody></table>"
+    ) if rows_html else (
+        "<p style=\"color:#4ade80;padding:20px;"
+        "font-family:sans-serif\">No issues found.</p>"
+    )
+
+    # ── Score cards ──────────────────────────────────────────────────────────
+    score_cards = ""
+    for sev_key, label, bar_c in [
+        ("critical", "Critical", "#ef4444"),
+        ("high",     "High",     "#f59e0b"),
+        ("medium",   "Medium",   "#3b82f6"),
+        ("low",      "Low",      "#22c55e"),
+        ("info",     "Info",     "#64748b"),
+    ]:
+        score_cards += (
+            "<td style=\"padding:0 5px\">"
+            "<div style=\"background:" + BG_CARD + ";border:1px solid " + BORDER + ";"
+            "border-top:3px solid " + bar_c + ";border-radius:6px;"
+            "padding:14px 12px;text-align:center;min-width:88px\">"
+            "<div style=\"font-size:30px;font-weight:800;color:" + bar_c + ";"
+            "font-family:sans-serif;line-height:1\">"
+            + str(counts[sev_key]) +
+            "</div>"
+            "<div style=\"font-size:10px;color:" + TXT_SEC + ";"
+            "font-family:sans-serif;margin-top:5px;"
+            "text-transform:uppercase;letter-spacing:.07em\">"
+            + label +
+            "</div>"
+            "</div>"
+            "</td>"
+        )
+
+    # ── Domain breakdown ─────────────────────────────────────────────────────
+    domain_rows = ""
+    for key, info in DOMAINS.items():
+        cnt    = domain_counts.get(key, 0)
+        plural = "s" if cnt != 1 else ""
+        if cnt == 0:
+            badge_bg, badge_fg = DOMAIN_BADGE["none"]
+        else:
+            badge_bg, badge_fg = DOMAIN_BADGE["has"]
+        domain_rows += (
+            "<tr>"
+            "<td style=\"padding:7px 12px;font-size:12px;"
+            "font-family:sans-serif;color:" + TXT_PRI + ";"
+            "border-bottom:1px solid " + BORDER + "\">"
+            + html.escape(info.get("title", key)) +
+            "</td>"
+            "<td style=\"padding:7px 12px;border-bottom:1px solid " + BORDER + ";text-align:right\">"
+            "<span style=\"display:inline-block;background:" + badge_bg + ";color:" + badge_fg + ";"
+            "font-size:10px;font-weight:700;font-family:sans-serif;"
+            "padding:2px 8px;border-radius:10px\">"
+            + str(cnt) + " issue" + plural +
+            "</span>"
+            "</td>"
+            "</tr>"
+        )
+
+    # ── Header meta ──────────────────────────────────────────────────────────
+    status_text  = "PASSED" if passed else "FAILED"
+    status_bg    = "#0f2818" if passed else "#2d0f0f"
+    status_color = "#4ade80" if passed else "#f87171"
+    status_bdr   = "#22c55e" if passed else "#ef4444"
+    status_icon  = "[PASSED]" if passed else "[FAILED]"
+    if passed:
+        status_detail = "No critical or high severity issues found."
+    else:
+        status_detail = (
+            str(counts["critical"]) + " critical, " +
+            str(counts["high"]) + " high issue(s) require attention."
+        )
+
+    escaped_build  = html.escape(BUILD_NUM)
+    escaped_branch = html.escape(BRANCH)
+    escaped_repo   = html.escape(REPO_NAME)
+    escaped_ts     = html.escape(meta.get("timestamp", ""))
+    escaped_dur    = html.escape(str(meta.get("duration_s", "")))
+
+    # ── Assemble ─────────────────────────────────────────────────────────────
+    return (
+        "<!DOCTYPE html>"
+        "<html lang=\'en\'><head>"
+        "<meta charset=\'UTF-8\'>"
+        "<meta name=\'viewport\' content=\'width=device-width,initial-scale=1\'>"
+        "<title>AI Code Review</title>"
+        "</head>"
+        "<body style=\'margin:0;padding:0;background:" + BG_PAGE + ";font-family:sans-serif\'>"
+
+        # ── Header ──────────────────────────────────────────────────────────
+        "<div style=\'background:" + BG_HEADER + ";"
+        "padding:18px 24px;border-bottom:1px solid " + BORDER + "\'>"
+        "<div style=\'font-size:17px;font-weight:700;color:" + TXT_PRI + ";"
+        "margin-bottom:8px\'>AI Code Review Dashboard</div>"
+        "<div style=\'font-size:12px;color:" + TXT_SEC + ";margin-bottom:12px\'>"
+        "Build: <strong style=\'color:" + TXT_PRI + "\'>" + escaped_build + "</strong>"
+        " &nbsp;|&nbsp; "
+        "Branch: <strong style=\'color:" + TXT_PRI + "\'>" + escaped_branch + "</strong>"
+        " &nbsp;|&nbsp; "
+        "Repo: <strong style=\'color:" + TXT_PRI + "\'>" + escaped_repo + "</strong>"
+        " &nbsp;|&nbsp; " + escaped_ts +
+        " &nbsp;|&nbsp; " + escaped_dur + "s analysis"
+        "</div>"
+        "<div style=\'display:inline-block;background:" + status_bg + ";"
+        "color:" + status_color + ";border:1px solid " + status_bdr + ";"
+        "padding:6px 14px;border-radius:4px;font-size:13px;font-weight:700;"
+        "font-family:sans-serif\'>"
+        + status_icon + " Review " + status_text + " &mdash; " + status_detail +
+        "</div>"
+        "</div>"
+
+        # ── Body ─────────────────────────────────────────────────────────────
+        "<div style=\'padding:20px 24px;background:" + BG_PAGE + "\'>"
+
+        # Score cards
+        "<div style=\'margin-bottom:22px\'>"
+        "<div style=\'font-size:11px;font-weight:600;color:" + TXT_SEC + ";"
+        "text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px\'>Issue Summary</div>"
+        "<table style=\'border-collapse:collapse\'><tr>" + score_cards + "</tr></table>"
+        "</div>"
+
+        # Two-column: domain breakdown + issues table
+        "<table style=\'width:100%;border-collapse:collapse;vertical-align:top\'><tr>"
+
+        # Left: domain breakdown
+        "<td style=\'width:210px;vertical-align:top;padding-right:18px\'>"
+        "<div style=\'font-size:11px;font-weight:600;color:" + TXT_SEC + ";"
+        "text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px\'>Domain Breakdown</div>"
+        "<table style=\'width:100%;border-collapse:collapse;"
+        "background:" + BG_CARD + ";border:1px solid " + BORDER + ";border-radius:6px\'>"
+        "<tbody>" + domain_rows + "</tbody></table>"
+        "</td>"
+
+        # Right: issues
+        "<td style=\'vertical-align:top\'>"
+        "<div style=\'font-size:11px;font-weight:600;color:" + TXT_SEC + ";"
+        "text-transform:uppercase;letter-spacing:.07em;margin-bottom:10px\'>"
+        "All Issues (" + str(total) + " total)</div>"
+        "<div style=\'border:1px solid " + BORDER + ";border-radius:6px;overflow:hidden\'>"
+        + issues_table +
+        "</div>"
+        "</td>"
+        "</tr></table>"
+
+        "</div>"   # /body padding
+        "</body></html>"
+    )
 
 # ─── PR comment builder ───────────────────────────────────────────────────────
 
